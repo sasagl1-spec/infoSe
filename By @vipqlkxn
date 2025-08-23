@@ -15,13 +15,13 @@ class GsazilInfoMod(loader.Module):
         self._client = client
         self._db = db
 
-    @loader.command()
-    async def infocmd(self, message):
-        """Получить информацию о пользователе через @Gsazilbot"""
+    @loader.command(alias="gsinfo")
+    async def gsazilinfocmd(self, message):
+        """Получить информацию о пользователе через @Gsazilbot - .gsinfo"""
         args = utils.get_args_raw(message)
         
         if not args:
-            await utils.answer(message, "❌ Укажите username или ID пользователя\nПример: `.info @username` или `.info 123456789`")
+            await utils.answer(message, "❌ Укажите username или ID пользователя\nПример: `.gsinfo @username` или `.gsinfo 123456789`")
             return
 
         try:
@@ -57,9 +57,9 @@ class GsazilInfoMod(loader.Module):
         except Exception as e:
             await utils.answer(message, f"❌ Ошибка: {str(e)}")
 
-    @loader.command()
-    async def inforeplycmd(self, message):
-        """Получить информацию о реплайнутом пользователе"""
+    @loader.command(alias="gsreply")
+    async def gsazilreplycmd(self, message):
+        """Получить информацию о реплайнутом пользователе - .gsreply"""
         reply = await message.get_reply_message()
         
         if not reply:
