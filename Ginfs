@@ -1,0 +1,161 @@
+# Telegram канал модулей: https://t.me/modulesTheHika
+# Создатель: @vipqlkxn
+
+from hikka import loader, utils
+from telethon.tl.functions.messages import SendMessageRequest
+from telethon.tl.functions.contacts import ResolveUsernameRequest
+import asyncio
+
+@loader.tds
+class GsazilInfoMod(loader.Module):
+    """🔍 Модуль для получения информации через @Gsazilbot"""
+    strings = {"name": "GsazilInfoPro"}
+
+    async def client_ready(self, client, db):
+        self._client = client
+        self._db = db
+
+    @loader.command(alias="ginf")
+    async def gsazilinfocmd(self, message):
+        """📊 Получить информацию о пользователе через @Gsazilbot - .ginf"""
+        args = utils.get_args_raw(message)
+        
+        if not args:
+            await utils.answer(message, "❌ Укажите username или ID пользователя\n💡 Пример: `.ginf @username` или `.ginf 123456789`")
+            return
+
+        try:
+            # Получаем entity пользователя/чата
+            if args.startswith("@"):
+                entity = await self._client(ResolveUsernameRequest(args[1:]))
+                target_id = entity.peer.user_id
+            else:
+                target = await self._client.get_entity(int(args))
+                target_id = target.id
+
+            # Отправляем запрос боту @Gsazilbot
+            bot_entity = await self._client(ResolveUsernameRequest("Gsazilbot"))
+            bot_input = await self._client.get_input_entity(bot_entity.peer)
+
+            # Отправляем ТОЛЬКО ID без команды /info
+            await self._client(SendMessageRequest(
+                peer=bot_input,
+                message=f"{target_id}",
+                no_webpage=True
+            ))
+
+            # Ждем ответа от бота
+            await asyncio.sleep(3)
+            async for msg in self._client.iter_messages(bot_input, limit=1):
+                if msg.out:
+                    continue
+                
+                # 🔄 Форматируем ответ для лучшего вида
+                formatted_text = self.format_bot_response(msg.text)
+                await utils.answer(message, formatted_text)
+                return
+
+            await utils.answer(message, "⏳ Бот не ответил в течение 3 секунд")
+
+        except ValueError:
+            await utils.answer(message, "❌ Неверный формат ID. Укажите числовой ID или @username")
+        except Exception as e:
+            await utils.answer(message, f"⚠️ Произошла ошибка:\n{str(e)}")
+
+    @loader.command(alias="ginfr")
+    async def gsazilreplycmd(self, message):
+        """📨 Получить информацию о пользователе из ответа - .ginfr"""
+        reply = await message.get_reply_message()
+        
+        if not reply:
+            await utils.answer(message, "↩️ Ответьте на сообщение пользователя")
+            return
+
+        try:
+            target = await reply.get_sender()
+            bot_entity = await self._client(ResolveUsernameRequest("Gsazilbot"))
+            bot_input = await self._client.get_input_entity(bot_entity.peer)
+
+            # Отправляем ТОЛЬКО ID без команды /info
+            await self._client(SendMessageRequest(
+                peer=bot_input,
+                message=f"{target.id}",
+                no_webpage=True
+            ))
+
+            await asyncio.sleep(3)
+            async for msg in self._client.iter_messages(bot_input, limit=1):
+                if msg.out:
+                    continue
+                
+                # 🔄 Форматируем ответ
+                formatted_text = self.format_bot_response(msg.text)
+                await utils.answer(message, formatted_text)
+                return
+
+            await utils.answer(message, "⏳ Бот не ответил в течение 3 секунд")
+
+        except Exception as e:
+            await utils.answer(message, f"⚠️ Произошла ошибка:\n{str(e)}")
+
+    def format_bot_response(self, text):
+        """🎨 Форматирование ответа от бота"""
+        if not text:
+            return "📭 Пустой ответ от бота"
+        
+        # Заменяем стандартные формулировки бота
+        replacements = {
+            "Информация о пользователе": "📋 **Информация о пользователе**",
+            "ID": "🆔 **ID**",
+            "Имя": "👤 **Имя**",
+            "Username": "📛 **Юзернейм**",
+            "Номер телефона": "📞 **Телефон**",
+            "Дата регистрации": "📅 **Регистрация**",
+            "Статус": "💬 **Статус**",
+            "Бот": "🤖 **Бот**",
+            "Да": "✅ **Да**",
+            "Нет": "❌ **Нет**",
+            "Сохранен в контактах": "📒 **В контактах**",
+            "Верифицирован": "🔐 **Верифицирован**",
+            "Премиум": "⭐ **Премиум**",
+            "Ограничен": "🚫 **Ограничен**",
+            "Скам": "⚡ **Скам**",
+            "Спам": "🔞 **Спам**",
+            "Фейк": "🎭 **Фейк**"
+        }
+        
+        # Применяем замены
+        for old, new in replacements.items():
+            text = text.replace(old, new)
+        
+        # Добавляем разделители
+        lines = text.split('\n')
+        formatted_lines = []
+        for line in lines:
+            if line.strip() and ':' in line:
+                formatted_lines.append(f"• {line}")
+            else:
+                formatted_lines.append(line)
+        
+        return "🔍 **Результат запроса:**\n\n" + "\n".join(formatted_lines)
+
+    @loader.command(alias="ginfhelp")
+    async def gsazilhelpcmd(self, message):
+        """📖 Показать справку по командам модуля - .ginfhelp"""
+        help_text = """
+🤖 **Модуль GsazilInfoPro**
+
+📋 **Доступные команды:**
+• `.ginf @username` - Получить информацию о пользователе
+• `.ginf 123456789` - Получить информацию по ID
+• `.ginfr` - Получить информацию из ответа на сообщение
+• `.ginfhelp` - Показать эту справку
+
+💡 **Примеры использования:**
+` .ginf @username `
+` .ginf 123456789 `
+` Ответьте на сообщение и используйте .ginfr `
+
+⚡ **Примечание:** Модуль использует бота @Gsazilbot для получения информации
+        """
+        await utils.answer(message, help_text)
