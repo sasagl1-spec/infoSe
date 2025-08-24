@@ -1,0 +1,211 @@
+# Telegram канал модулей: https://t.me/modulesTheHika
+# Создатель: @vipqlkxn
+
+from hikka import loader, utils
+from telethon.tl.functions.messages import GetMessagesRequest, ForwardMessagesRequest
+from telethon.tl.types import MessageService, MessageMediaPhoto, MessageMediaDocument
+from telethon.tl.functions.messages import SaveGifRequest, SaveRecentStickerRequest
+import asyncio
+import time
+import os
+
+@loader.tds
+class AutoSaveMod(loader.Module):
+    """💾 Автосохранение сообщений, фото и медиа в избранное"""
+    strings = {"name": "AutoSaverPro"}
+
+    def __init__(self):
+        self.config = loader.ModuleConfig(
+            "auto_save_enabled", True, "Автоматическое сохранение включено"
+        )
+        self.saved_messages = set()
+        self.favorite_folder = "saved_messages"
+
+    async def client_ready(self, client, db):
+        self._client = client
+        self._db = db
+        # Создаем папку для сохраненных сообщений
+        os.makedirs(self.favorite_folder, exist_ok=True)
+        print("✅ AutoSaverPro загружен и готов к работе!")
+
+    @loader.command(alias="autosave")
+    async def autosave_cmd(self, message):
+        """🔧 Включить/выключить автосохранение - .autosave"""
+        self.config["auto_save_enabled"] = not self.config["auto_save_enabled"]
+        status = "включено ✅" if self.config["auto_save_enabled"] else "выключено ❌"
+        await utils.answer(message, f"💾 Автосохранение {status}")
+
+    @loader.command(alias="savechat")
+    async def save_chat_cmd(self, message):
+        """💿 Сохранить весь чат в избранное - .savechat"""
+        args = utils.get_args_raw(message)
+        chat_id = message.chat_id
+        
+        if args and args.isdigit():
+            chat_id = int(args)
+        
+        await utils.answer(message, "📥 Начинаю сохранение чата...")
+        
+        try:
+            saved_count = 0
+            async for msg in self._client.iter_messages(chat_id, limit=1000):
+                if await self.save_message(msg):
+                    saved_count += 1
+                    await asyncio.sleep(0.1)  # Чтобы не спамить
+            
+            await utils.answer(message, f"✅ Сохранено {saved_count} сообщений из чата")
+            
+        except Exception as e:
+            await utils.answer(message, f"❌ Ошибка: {str(e)}")
+
+    @loader.command(alias="savemsg")
+    async def save_message_cmd(self, message):
+        """📌 Сохранить конкретное сообщение - .savemsg"""
+        reply = await message.get_reply_message()
+        if not reply:
+            await utils.answer(message, "↩️ Ответьте на сообщение для сохранения")
+            return
+        
+        if await self.save_message(reply):
+            await utils.answer(message, "✅ Сообщение сохранено в избранное!")
+        else:
+            await utils.answer(message, "❌ Не удалось сохранить сообщение")
+
+    async def save_message(self, message):
+        """💾 Основная функция сохранения сообщения"""
+        try:
+            if message.id in self.saved_messages:
+                return False
+            
+            # Сохраняем в избранное (Favorites)
+            await message.forward_to('me')
+            
+            # Дополнительно сохраняем медиа файлы
+            if message.media:
+                await self.download_media(message)
+            
+            self.saved_messages.add(message.id)
+            self.log_saved_message(message)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Ошибка сохранения: {e}")
+            return False
+
+    async def download_media(self, message):
+        """📥 Скачивание медиафайлов"""
+        try:
+            if isinstance(message.media, (MessageMediaPhoto, MessageMediaDocument)):
+                # Создаем уникальное имя файла
+                timestamp = int(time.time())
+                filename = f"{self.favorite_folder}/{message.chat_id}_{message.id}_{timestamp}"
+                
+                # Скачиваем медиа
+                await message.download_media(file=filename)
+                
+                # Для фото и документов сохраняем дополнительную информацию
+                if isinstance(message.media, MessageMediaPhoto):
+                    print(f"📸 Сохранено фото: {filename}")
+                else:
+                    print(f"📁 Сохранен документ: {filename}")
+                    
+        except Exception as e:
+            print(f"Ошибка скачивания медиа: {e}")
+
+    def log_saved_message(self, message):
+        """📝 Логирование сохраненных сообщений"""
+        log_file = f"{self.favorite_folder}/saved_messages.log"
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"{time.ctime()} | Chat: {message.chat_id} | MsgID: {message.id}\n")
+
+    @loader.command(alias="savedstats")
+    async def saved_stats_cmd(self, message):
+        """📊 Статистика сохраненных сообщений - .savedstats"""
+        log_file = f"{self.favorite_folder}/saved_messages.log"
+        if os.path.exists(log_file):
+            with open(log_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            
+            stats = f"📊 Статистика сохранений:\n"
+            stats += f"• Всего сообщений: {len(self.saved_messages)}\n"
+            stats += f"• В лог-файле: {len(lines)} записей\n"
+            stats += f"• Автосохранение: {'ВКЛ ✅' if self.config['auto_save_enabled'] else 'ВЫКЛ ❌'}"
+            
+            await utils.answer(message, stats)
+        else:
+            await utils.answer(message, "📝 Лог-файл не найден")
+
+    @loader.command(alias="clearsaved")
+    async def clear_saved_cmd(self, message):
+        """🗑️ Очистить список сохраненных сообщений - .clearsaved"""
+        self.saved_messages.clear()
+        await utils.answer(message, "✅ Список сохраненных сообщений очищен")
+
+    # 🔥 Обработчик самоуничтожающихся сообщений
+    @loader.watcher()
+    async def watcher(self, message):
+        """👀 Наблюдатель за сообщениями"""
+        if not self.config["auto_save_enabled"]:
+            return
+        
+        try:
+            # Проверяем на самоуничтожающиеся сообщения
+            if hasattr(message, 'ttl_period') and message.ttl_period:
+                print(f"⚠️ Обнаружено самоуничтожающееся сообщение! ID: {message.id}")
+                await self.save_message(message)
+                return
+            
+            # Проверяем на медиафайлы
+            if message.media and message.id not in self.saved_messages:
+                # Автосохранение важных медиа
+                if isinstance(message.media, MessageMediaPhoto):
+                    print(f"📸 Автосохранение фото из чата {message.chat_id}")
+                    await self.save_message(message)
+                
+        except Exception as e:
+            print(f"Ошибка в наблюдателе: {e}")
+
+    # 🎯 Специальная функция для перехвата disappearing media
+    @loader.watcher(only_messages=True, from_self=False)
+    async def disappearing_media_watcher(self, message):
+        """📸 Перехват исчезающих медиа"""
+        if not self.config["auto_save_enabled"]:
+            return
+        
+        try:
+            # Проверяем признаки disappearing media
+            if (hasattr(message, 'media') and message.media and 
+                hasattr(message, 'ttl_period') and message.ttl_period > 0):
+                
+                print(f"🚨 Перехвачено исчезающее медиа! TTL: {message.ttl_period} сек")
+                await self.save_message(message)
+                
+        except Exception as e:
+            print(f"Ошибка перехвата медиа: {e}")
+
+    @loader.command(alias="savehelp")
+    async def save_help_cmd(self, message):
+        """📖 Помощь по модулю AutoSaver - .savehelp"""
+        help_text = """
+💾 **AutoSaverPro - Помощь по командам**
+
+🔧 **Основные команды:**
+• `.autosave` - Вкл/выкл автосохранение
+• `.savemsg` - Сохранить сообщение (ответить)
+• `.savechat` - Сохранить весь чат
+• `.savedstats` - Статистика сохранений
+• `.clearsaved` - Очистить список
+
+👀 **Автоматически сохраняет:**
+• Самоуничтожающиеся сообщения ⏳
+• Исчезающие фото и видео 📸
+• Важные медиафайлы 📁
+• Сообщения с TTL 🚨
+
+⚡ **Примечание:** Все сохраняется в "Избранное" и локальную папку
+        """
+        await utils.answer(message, help_text)
+
+# 🎉 Модуль готов к использованию!
+print("✅ AutoSaverPro успешно загружен!")
