@@ -1,0 +1,234 @@
+# Telegram канал модулей: https://t.me/modulesTheHika
+# Создатель: @vipqlkxn
+
+from hikka import loader, utils
+from telethon.tl.functions.messages import SendReactionRequest
+from telethon.tl.types import ReactionEmoji
+import asyncio
+import re
+
+@loader.tds
+class AutoReactorMod(loader.Module):
+    """🤖 Автоматическая установка реакций в чатах"""
+    strings = {"name": "AutoReactor"}
+
+    def __init__(self):
+        self.config = loader.ModuleConfig(
+            "reaction_delay", 40, "Количество сообщений между реакциями",
+            "enabled_chats", {}, "Чаты с активными реакциями",
+            "default_reaction", "👍", "Реакция по умолчанию"
+        )
+        self.active = True
+        self.message_counters = {}
+
+    async def client_ready(self, client, db):
+        self._client = client
+        self._db = db
+        print("✅ AutoReactor загружен и готов к работе!")
+
+    @loader.command(alias="reac")
+    async def reac_cmd(self, message):
+        """⚡ Настройка автоматических реакций - .reac <реакция> <ссылка> <интервал>"""
+        args = utils.get_args_raw(message)
+        
+        if not args:
+            await self.show_help(message)
+            return
+
+        # Парсим аргументы
+        parts = args.split()
+        if len(parts) < 2:
+            await utils.answer(message, "❌ Недостаточно аргументов\n💡 Пример: .reac 👍 t.me/chatname 40")
+            return
+
+        reaction = parts[0]
+        chat_link = parts[1]
+        interval = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 40
+
+        try:
+            # Получаем ID чата из ссылки
+            chat_entity = await self.resolve_chat(chat_link)
+            if not chat_entity:
+                await utils.answer(message, "❌ Не удалось найти чат")
+                return
+
+            chat_id = chat_entity.id
+            chat_title = getattr(chat_entity, 'title', 'Unknown Chat')
+
+            # Сохраняем настройки для чата
+            self.config["enabled_chats"][str(chat_id)] = {
+                "reaction": reaction,
+                "interval": interval,
+                "title": chat_title
+            }
+
+            # Инициализируем счетчик для чата
+            self.message_counters[str(chat_id)] = 0
+
+            await utils.answer(message, f"✅ Настроены реакции для {chat_title}:\n"
+                                      f"• Реакция: {reaction}\n"
+                                      f"• Интервал: каждые {interval} сообщений\n"
+                                      f"• Статус: АКТИВНО ✅")
+
+        except Exception as e:
+            await utils.answer(message, f"❌ Ошибка: {str(e)}")
+
+    async def resolve_chat(self, chat_link):
+        """🔍 Получение entity чата из ссылки"""
+        try:
+            # Убираем https:// и т.д.
+            clean_link = re.sub(r'https?://', '', chat_link).replace('t.me/', '')
+            
+            # Пробуем получить чат
+            entity = await self._client.get_entity(clean_link)
+            return entity
+            
+        except Exception as e:
+            print(f"Ошибка получения чата: {e}")
+            return None
+
+    @loader.command(alias="reaclist")
+    async def reac_list_cmd(self, message):
+        """📋 Список чатов с реакциями - .reaclist"""
+        if not self.config["enabled_chats"]:
+            await utils.answer(message, "📭 Нет активных чатов с реакциями")
+            return
+
+        response = "📋 **Чаты с автоматическими реакциями:**\n\n"
+        for chat_id, settings in self.config["enabled_chats"].items():
+            response += f"• {settings['title']}\n"
+            response += f"  Реакция: {settings['reaction']}\n"
+            response += f"  Интервал: каждые {settings['interval']} сообщений\n"
+            response += f"  Счетчик: {self.message_counters.get(chat_id, 0)}\n\n"
+
+        await utils.answer(message, response)
+
+    @loader.command(alias="reacstop")
+    async def reac_stop_cmd(self, message):
+        """⏹️ Остановить все реакции - .reacstop"""
+        self.active = False
+        self.config["enabled_chats"] = {}
+        self.message_counters = {}
+        await utils.answer(message, "⏹️ Все реакции остановлены")
+
+    @loader.command(alias="reacstart")
+    async def reac_start_cmd(self, message):
+        """▶️ Запустить реакции - .reacstart"""
+        self.active = True
+        await utils.answer(message, "▶️ Автореакции активированы")
+
+    @loader.command(alias="reacremove")
+    async def reac_remove_cmd(self, message):
+        """🗑️ Удалить чат из списка - .reacremove <ссылка>"""
+        args = utils.get_args_raw(message)
+        if not args:
+            await utils.answer(message, "❌ Укажите ссылку на чат")
+            return
+
+        try:
+            chat_entity = await self.resolve_chat(args)
+            if not chat_entity:
+                await utils.answer(message, "❌ Чат не найден")
+                return
+
+            chat_id = str(chat_entity.id)
+            if chat_id in self.config["enabled_chats"]:
+                chat_title = self.config["enabled_chats"][chat_id]["title"]
+                del self.config["enabled_chats"][chat_id]
+                self.message_counters.pop(chat_id, None)
+                
+                await utils.answer(message, f"✅ Реакции удалены для чата: {chat_title}")
+            else:
+                await utils.answer(message, "❌ Чат не найден в списке")
+
+        except Exception as e:
+            await utils.answer(message, f"❌ Ошибка: {str(e)}")
+
+    @loader.watcher()
+    async def message_watcher(self, message):
+        """👀 Наблюдатель за сообщениями для установки реакций"""
+        if not self.active or not message:
+            return
+
+        try:
+            chat_id = str(message.chat_id)
+            if chat_id not in self.config["enabled_chats"]:
+                return
+
+            # Увеличиваем счетчик сообщений
+            self.message_counters[chat_id] = self.message_counters.get(chat_id, 0) + 1
+            
+            settings = self.config["enabled_chats"][chat_id]
+            interval = settings["interval"]
+            reaction = settings["reaction"]
+
+            # Проверяем, нужно ли ставить реакцию
+            if self.message_counters[chat_id] >= interval:
+                await self.set_reaction(message, reaction)
+                self.message_counters[chat_id] = 0  # Сбрасываем счетчик
+                print(f"✅ Поставлена реакция {reaction} в чате {settings['title']}")
+
+        except Exception as e:
+            print(f"❌ Ошибка в наблюдателе: {e}")
+
+    async def set_reaction(self, message, reaction):
+        """🎯 Установка реакции на сообщение"""
+        try:
+            # Создаем объект реакции
+            reaction_obj = ReactionEmoji(emoticon=reaction)
+            
+            # Отправляем реакцию
+            await self._client(SendReactionRequest(
+                peer=message.chat_id,
+                msg_id=message.id,
+                reaction=[reaction_obj]
+            ))
+            
+        except Exception as e:
+            print(f"❌ Ошибка установки реакции: {e}")
+
+    async def show_help(self, message):
+        """📖 Показать справку"""
+        help_text = """
+🤖 **AutoReactor - Помощь по командам**
+
+⚡ **Основные команды:**
+• `.reac <реакция> <ссылка> <интервал>` - Настроить реакции
+• `.reaclist` - Список активных чатов
+• `.reacstop` - Остановить все реакции
+• `.reacstart` - Запустить реакции
+• `.reacremove <ссылка>` - Удалить чат из списка
+
+🎯 **Примеры использования:**
+• `.reac 👍 t.me/mygroup 40` - Ставить 👍 каждые 40 сообщений
+• `.reac 🚀 @channelname 25` - Ставить 🚀 каждые 25 сообщений
+• `.reac ❤️ t.me/chat 1` - Ставить ❤️ на каждое сообщение
+
+💡 **Доступные реакции:** Любые эмодзи (👍, ❤️, 🎉, 😂, 🚀 и т.д.)
+
+⚠️ **Примечание:** Бот должен иметь права на установку реакций в чате
+        """
+        await utils.answer(message, help_text)
+
+    @loader.command(alias="reactest")
+    async def reac_test_cmd(self, message):
+        """🧪 Тестовая реакция - .reactest <реакция>"""
+        args = utils.get_args_raw(message)
+        if not args:
+            await utils.answer(message, "❌ Укажите реакцию для теста")
+            return
+
+        try:
+            reply = await message.get_reply_message()
+            if not reply:
+                await utils.answer(message, "↩️ Ответьте на сообщение для теста")
+                return
+
+            await self.set_reaction(reply, args)
+            await utils.answer(message, f"✅ Тестовая реакция {args} установлена")
+
+        except Exception as e:
+            await utils.answer(message, f"❌ Ошибка теста: {str(e)}")
+
+# 🎉 Модуль готов к использованию!
+print("✅ AutoReactor успешно загружен!")
